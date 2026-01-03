@@ -1,29 +1,88 @@
 import streamlit as st
-import tempfile
-import pdfplumber
-from processor import process_pdf
+import os
+import uuid
 
-st.set_page_config(page_title="Cyber Fraud Analyzer", layout="centered")
-st.title("Cyber Fraud PDF Analyzer")
-st.write("Upload one or more cybercrime complaint PDFs and download structured Excel reports.")
+# IMPORTANT: updated import name
+from processor import process_pdf, save_consolidated_excel
 
-uploaded_files = st.file_uploader("Upload PDF(s)", type=["pdf"], accept_multiple_files=True)
+# =====================================================
+# PAGE CONFIG
+# =====================================================
+st.set_page_config(
+    page_title="NCRP Document Analyzer",
+    layout="centered"
+)
+
+st.title("NCRP Document Analyzer")
+st.write("Upload cybercrime complaint PDFs and download a structured Excel report.")
+
+# =====================================================
+# BACKEND STORAGE
+# =====================================================
+BACKEND_FOLDER = "uploaded_pdfs"
+os.makedirs(BACKEND_FOLDER, exist_ok=True)
+
+# =====================================================
+# FILE UPLOAD
+# =====================================================
+uploaded_files = st.file_uploader(
+    "Upload PDF(s)",
+    type=["pdf"],
+    accept_multiple_files=True
+)
 
 if uploaded_files:
-    for uploaded_file in uploaded_files:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_pdf:
-            tmp_pdf.write(uploaded_file.read())
-            tmp_pdf_path = tmp_pdf.name
+    st.success(f"{len(uploaded_files)} PDF(s) uploaded.")
 
-        output_path = tmp_pdf_path.replace(".pdf",".xlsx")
+    if st.button("Start Processing"):
+        all_records = []
 
-        with st.spinner(f"Processing {uploaded_file.name}..."):
-            process_pdf(tmp_pdf_path, output_path)
+        with st.spinner("Processing PDFs..."):
+            for uploaded_file in uploaded_files:
+                try:
+                    # ---------------------------------------------
+                    # SAVE PDF SAFELY
+                    # ---------------------------------------------
+                    unique_name = f"{uuid.uuid4().hex}_{uploaded_file.name}"
+                    backend_path = os.path.join(BACKEND_FOLDER, unique_name)
 
-        with open(output_path,"rb") as f:
+                    with open(backend_path, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
+
+                    # ---------------------------------------------
+                    # PROCESS PDF (RETURNS LIST OF COMPLAINTS)
+                    # ---------------------------------------------
+                    records = process_pdf(backend_path)
+
+                    if records:
+                        all_records.extend(records)
+
+                except Exception as e:
+                    st.error(f"Failed to process {uploaded_file.name}: {e}")
+
+        if not all_records:
+            st.error("No valid complaints were extracted from the PDFs.")
+            st.stop()
+
+        # =================================================
+        # SAVE EXCEL
+        # =================================================
+        output_excel_path = os.path.join(
+            BACKEND_FOLDER,
+            "Consolidated_Report.xlsx"
+        )
+
+        save_consolidated_excel(all_records, output_excel_path)
+
+        st.success(f"Processing complete. {len(all_records)} unique complaint(s) extracted.")
+
+        # =================================================
+        # DOWNLOAD BUTTON
+        # =================================================
+        with open(output_excel_path, "rb") as f:
             st.download_button(
-                label=f"Download Excel for {uploaded_file.name}",
+                label="Download Consolidated Excel",
                 data=f,
-                file_name=uploaded_file.name.replace(".pdf",".xlsx"),
+                file_name="Consolidated_Report.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
